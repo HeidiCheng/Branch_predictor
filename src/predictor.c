@@ -6,6 +6,8 @@
 //  described in the README                               //
 //========================================================//
 #include <stdio.h>
+#include <math.h>
+#include <string.h>
 #include "predictor.h"
 
 //
@@ -37,6 +39,30 @@ int verbose;
 //TODO: Add your own Branch Predictor data structures here
 //
 
+// Data Structures for Tournament branch predictor
+struct GlobalPredictor {
+  uint32_t historyRegister; 
+  // TODO: Find a way to use only two bits
+  // Global Prediction Table: 4096 x 2 bits
+  // uint8_t pht[4096]; // Pattern History Table
+  uint8_t *pht; 
+}; 
+
+struct LocalPredictor {
+  // TODO: Find a way to use only 10 bits
+  // uint16_t lht[1024]; // Local History Table
+  uint32_t *lht; 
+  // TODO: Find a way to use only 3 bits
+  // uint8_t lpt[1024]; // Local Prediction Table
+  uint8_t *lpt; 
+}; 
+
+// Used in tournament predictor
+uint32_t globalHistoryRegister; 
+uint8_t *globalPHT = NULL;
+uint32_t *localLHT = NULL; 
+uint8_t *localLPT = NULL;   
+uint8_t *choicePredictor = NULL; 
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -50,12 +76,62 @@ init_predictor()
   //
   //TODO: Initialize Branch Predictor Data Structures
   //
+  size_t gpSize = pow(2, ghistoryBits); 
+  size_t lhSize = pow(2, pcIndexBits); 
+  size_t lpSize = pow(2, lhistoryBits); 
+  // Init global predictor
+  globalPHT = (uint8_t*)malloc(sizeof(uint8_t)*gpSize); 
+  memset(globalPHT, 3, sizeof(uint8_t)*gpSize);
+  globalHistoryRegister = ghistoryBits == 32 ? 0 : (1 << ghistoryBits) - 1; 
+  
+  // Init local predictor
+  localLHT = (uint32_t*)malloc(sizeof(uint32_t)*lhSize);
+  localLPT = (uint8_t*)malloc(sizeof(uint8_t)*lpSize);
+  // init local history to not taken
+  memset(localLHT, 0, sizeof(uint32_t)*lhSize); 
+  memset(localLPT, 3, sizeof(uint8_t)*lpSize); 
+
+  // Init chioce predictor
+  choicePredictor = (uint8_t*)malloc(sizeof(uint8_t)*gpSize); 
+  // Prefer to choose result from local predictor in the beginning
+  memset(choicePredictor, 0, sizeof(uint8_t)*gpSize); 
+}
+
+// Local Prediction
+uint8_t local_prediction(uint32_t pc) {
+  if(pcIndexBits != 32) {
+    uint32_t pcMask = (1 << pcIndexBits) - 1;
+    //printf("PC: %d, pcMask: %d\n", pc, pcMask); 
+    pc &= pcMask; 
+  }
+  uint32_t indexLPT = localLHT[pc]; 
+  // printf("indexLPT: %d\n", indexLPT); 
+  // Use the first bit as the prediction
+  uint8_t localPrediction = localLPT[indexLPT] & 2; 
+  // printf("indexLPT: %d\n", indexLPT); 
+  
+  return localPrediction == 2; 
+}
+
+// Global Prediction
+uint8_t global_prediction() {
+  uint8_t globalPrediction = globalPHT[globalHistoryRegister] & 2; 
+  return globalPrediction == 2; 
+}
+
+uint8_t tournament_prediction(uint32_t pc) {
+  uint8_t choice = choicePredictor[globalHistoryRegister] & 2;
+  // printf("Chioce: %d\n", choice); 
+  if(choice == 0) { 
+    return local_prediction(pc); 
+  } 
+  return global_prediction(); 
 }
 
 // Make a prediction for conditional branch instruction at PC 'pc'
 // Returning TAKEN indicates a prediction of taken; returning NOTTAKEN
 // indicates a prediction of not taken
-//
+
 uint8_t
 make_prediction(uint32_t pc)
 {
@@ -69,6 +145,7 @@ make_prediction(uint32_t pc)
       return TAKEN;
     case GSHARE:
     case TOURNAMENT:
+      return tournament_prediction(pc); 
     case CUSTOM:
     default:
       break;
@@ -88,4 +165,60 @@ train_predictor(uint32_t pc, uint8_t outcome)
   //
   //TODO: Implement Predictor training
   //
+
+  // Update tournament predictor
+  // 1. local predictor
+  if(pcIndexBits != 32) {
+    uint32_t pcMask = (1 << pcIndexBits) - 1;
+    pc &= pcMask; 
+  }
+  localLHT[pc] = localLHT[pc] >> 1; 
+  // Set the first bit to 1 when outcome is TAKEN
+  if(outcome == TAKEN){
+    localLHT[pc] = localLHT[pc] | (1 << (pcIndexBits - 1)); 
+  }
+  uint32_t localHistory = localLHT[pc]; 
+  if(outcome == TAKEN && localLPT[localHistory] != ST){
+    localLPT[localHistory]++; 
+  }
+  if(outcome == NOTTAKEN && localLPT[localHistory] != SN) {
+    localLPT[localHistory]--; 
+  }
+
+  // 2. global predictor
+  globalHistoryRegister = globalHistoryRegister >> 1; 
+  if(outcome == TAKEN) {
+    globalHistoryRegister = globalHistoryRegister | (1 << (ghistoryBits - 1)); 
+  }
+  if(outcome == TAKEN && globalPHT[globalHistoryRegister] != ST){
+    globalPHT[globalHistoryRegister]++; 
+  }
+  if(outcome == NOTTAKEN && globalPHT[globalHistoryRegister] != SN) {
+    globalPHT[globalHistoryRegister]--; 
+  }
+
+  // 3. choice predictor
+  uint8_t choice = choicePredictor[globalHistoryRegister] & 2;
+  uint8_t localPrediction = local_prediction(pc); 
+  uint8_t globalPrediction = global_prediction(); 
+  if(choice == 0 && localPrediction != outcome && globalPrediction == outcome) {
+    choicePredictor[globalHistoryRegister]++; 
+  }else if(choice == 1 && localPrediction == outcome && globalPrediction != outcome) {
+    choicePredictor[globalHistoryRegister]--; 
+  }
+}
+
+void clean_predictor() {
+  if(globalPHT != NULL) {
+    free(globalPHT); 
+  }
+  if(localLHT != NULL) {
+    free(localLHT); 
+  }
+  if(localLPT != NULL) {
+    free(localLPT); 
+  }
+  if(choicePredictor != NULL){
+    free(choicePredictor); 
+  }
 }

@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 //
 // Student Information
@@ -66,5 +67,8 @@ uint8_t make_prediction(uint32_t pc);
 // indicates that the branch was not taken)
 //
 void train_predictor(uint32_t pc, uint8_t outcome);
+
+// Clean pointers in predictor
+void clean_predictor(); 
 
 #endif
