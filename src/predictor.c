@@ -61,7 +61,7 @@ struct LocalPredictor {
 uint32_t g_history_reg;
 // uint8_t *g_PHT; //globalPHT
 
-// Used in tournament predictor
+// tournament predictor
 uint32_t globalHistoryRegister; 
 uint8_t *globalPHT = NULL;
 uint32_t *localLHT = NULL; 
@@ -85,8 +85,9 @@ init_predictor()
   size_t lpSize = pow(2, lhistoryBits); 
   // Init global predictor
   globalPHT = (uint8_t*)malloc(sizeof(uint8_t)*gpSize); 
-  memset(globalPHT, 3, sizeof(uint8_t)*gpSize);
-  globalHistoryRegister = ghistoryBits == 32 ? 0 : (1 << ghistoryBits) - 1; 
+  memset(globalPHT, 0, sizeof(uint8_t)*gpSize);
+  // globalHistoryRegister = ghistoryBits == 32 ? 0 : (1 << ghistoryBits) - 1; 
+  globalHistoryRegister = 0;
   
   // init for gshare
   g_history_reg = 0;
@@ -97,7 +98,7 @@ init_predictor()
   localLPT = (uint8_t*)malloc(sizeof(uint8_t)*lpSize);
   // init local history to not taken
   memset(localLHT, 0, sizeof(uint32_t)*lhSize); 
-  memset(localLPT, 3, sizeof(uint8_t)*lpSize); 
+  memset(localLPT, 0, sizeof(uint8_t)*lpSize); 
 
   // Init chioce predictor
   choicePredictor = (uint8_t*)malloc(sizeof(uint8_t)*gpSize); 
@@ -136,13 +137,6 @@ uint8_t tournament_prediction(uint32_t pc) {
   return global_prediction(); 
 }
 
-// GSHARE branch predictor
-uint8_t gshare_prediction(uint32_t pc) {
-  uint32_t g_index = gshare_get_index(pc);
-  uint8_t g_prediction = globalPHT[g_index];
-  return (g_prediction >= 2) ? 1 : 0;
-}
-
 uint32_t gshare_get_index(uint32_t pc) {
   // XOR n-bit GHR and n-bit pc
   uint32_t g_xor = (g_history_reg ^ pc);
@@ -152,10 +146,16 @@ uint32_t gshare_get_index(uint32_t pc) {
   return g_index;
 }
 
+// GSHARE branch predictor
+uint8_t gshare_prediction(uint32_t pc) {
+  uint32_t g_index = gshare_get_index(pc);
+  uint8_t g_prediction = globalPHT[g_index];
+  return (g_prediction >= 2) ? 1 : 0;
+}
+
 // Make a prediction for conditional branch instruction at PC 'pc'
 // Returning TAKEN indicates a prediction of taken; returning NOTTAKEN
 // indicates a prediction of not taken
-
 uint8_t
 make_prediction(uint32_t pc)
 {
@@ -180,6 +180,65 @@ make_prediction(uint32_t pc)
   return NOTTAKEN;
 }
 
+void train_gshare(uint32_t pc, uint8_t outcome) {
+  uint32_t g_index = gshare_get_index(pc);
+  uint8_t g_prediction = globalPHT[g_index];
+  // updates history register with outcome
+  g_history_reg = g_history_reg << 1;
+  g_history_reg = g_history_reg | outcome;
+  // update prediction based on the actual outcome
+  if (outcome == 0 && g_prediction != SN) {
+    // if not strong not taken
+    globalPHT[g_index]--;
+  }
+  if (outcome == 1 && g_prediction != ST) {
+    globalPHT[g_index]++;
+  }
+}
+
+void train_tournament(uint32_t pc, uint8_t outcome) {
+  // Update tournament predictor
+  // 1. local predictor
+  if(pcIndexBits != 32) {
+    uint32_t pcMask = (1 << pcIndexBits) - 1;
+    pc &= pcMask; 
+  }
+  localLHT[pc] = localLHT[pc] >> 1; 
+  // Set the first bit to 1 when outcome is TAKEN
+  if(outcome == TAKEN){
+    localLHT[pc] = localLHT[pc] | (1 << (pcIndexBits - 1)); 
+  }
+  uint32_t localHistory = localLHT[pc]; 
+  if(outcome == TAKEN && localLPT[localHistory] != ST){
+    localLPT[localHistory]++; 
+  }
+  if(outcome == NOTTAKEN && localLPT[localHistory] != SN) {
+    localLPT[localHistory]--; 
+  }
+
+  // 2. global predictor
+  globalHistoryRegister = globalHistoryRegister >> 1; 
+  if(outcome == TAKEN) {
+    globalHistoryRegister = globalHistoryRegister | (1 << (ghistoryBits - 1)); 
+  }
+  if(outcome == TAKEN && globalPHT[globalHistoryRegister] != ST){
+    globalPHT[globalHistoryRegister]++; 
+  }
+  if(outcome == NOTTAKEN && globalPHT[globalHistoryRegister] != SN) {
+    globalPHT[globalHistoryRegister]--; 
+  }
+
+  // 3. choice predictor
+  uint8_t choice = choicePredictor[globalHistoryRegister] & 2;
+  uint8_t localPrediction = local_prediction(pc); 
+  uint8_t globalPrediction = global_prediction(); 
+  if(choice == 0 && localPrediction != outcome && globalPrediction == outcome) {
+    choicePredictor[globalHistoryRegister]++; 
+  }else if(choice == 1 && localPrediction == outcome && globalPrediction != outcome) {
+    choicePredictor[globalHistoryRegister]--; 
+  }
+}
+
 // Train the predictor the last executed branch at PC 'pc' and with
 // outcome 'outcome' (true indicates that the branch was taken, false
 // indicates that the branch was not taken)
@@ -190,66 +249,13 @@ train_predictor(uint32_t pc, uint8_t outcome)
   //
   //TODO: Implement Predictor training
   //
-
   switch (bpType) {
     case GSHARE:
-      uint32_t g_index = gshare_get_index(pc);
-      uint8_t g_prediction = globalPHT[g_index];
-      // updates history register with outcome
-      g_history_reg = g_history_reg << 1;
-      g_history_reg = g_history_reg | outcome;
-      // update prediction based on the actual outcome
-      if (outcome == 0 && g_prediction != SN) {
-        // if not strong not taken
-        globalPHT[g_index]--;
-      }
-      if (outcome == 1 && g_prediction != ST) {
-        globalPHT[g_index]++;
-      }
+      train_gshare(pc, outcome); 
       return;
     case TOURNAMENT:
-      // Update tournament predictor
-      // 1. local predictor
-      if(pcIndexBits != 32) {
-        uint32_t pcMask = (1 << pcIndexBits) - 1;
-        pc &= pcMask; 
-      }
-      localLHT[pc] = localLHT[pc] >> 1; 
-      // Set the first bit to 1 when outcome is TAKEN
-      if(outcome == TAKEN){
-        localLHT[pc] = localLHT[pc] | (1 << (pcIndexBits - 1)); 
-      }
-      uint32_t localHistory = localLHT[pc]; 
-      if(outcome == TAKEN && localLPT[localHistory] != ST){
-        localLPT[localHistory]++; 
-      }
-      if(outcome == NOTTAKEN && localLPT[localHistory] != SN) {
-        localLPT[localHistory]--; 
-      }
-
-      // 2. global predictor
-      globalHistoryRegister = globalHistoryRegister >> 1; 
-      if(outcome == TAKEN) {
-        globalHistoryRegister = globalHistoryRegister | (1 << (ghistoryBits - 1)); 
-      }
-      if(outcome == TAKEN && globalPHT[globalHistoryRegister] != ST){
-        globalPHT[globalHistoryRegister]++; 
-      }
-      if(outcome == NOTTAKEN && globalPHT[globalHistoryRegister] != SN) {
-        globalPHT[globalHistoryRegister]--; 
-      }
-
-      // 3. choice predictor
-      uint8_t choice = choicePredictor[globalHistoryRegister] & 2;
-      uint8_t localPrediction = local_prediction(pc); 
-      uint8_t globalPrediction = global_prediction(); 
-      if(choice == 0 && localPrediction != outcome && globalPrediction == outcome) {
-        choicePredictor[globalHistoryRegister]++; 
-      }else if(choice == 1 && localPrediction == outcome && globalPrediction != outcome) {
-        choicePredictor[globalHistoryRegister]--; 
-      }
+      train_tournament(pc, outcome); 
     case CUSTOM:
-
     default:
       break;
   }
