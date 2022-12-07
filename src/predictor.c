@@ -52,7 +52,7 @@ uint8_t *choicePredictor = NULL;
 
 // tage predictor
 typedef struct {
-  uint8_t counter; 
+  int8_t counter; 
   uint16_t tag; 
   uint8_t usage; 
 } Entry; 
@@ -222,6 +222,25 @@ Entry *get_tagged_item(uint32_t pc) {
   return NULL; 
 }
 
+Entry *get_tagged_altitem(uint32_t pc) {
+  uint32_t tag0 = get_tag(TAG_CONST, pc); 
+  uint32_t tag1 = get_tag(2 * TAG_CONST, pc); 
+  uint32_t tag2 = get_tag(4 * TAG_CONST, pc); 
+  uint32_t index0 = get_tag_index(TAG_CONST, pc); 
+  uint32_t index1 = get_tag_index(2 * TAG_CONST, pc);
+  uint32_t index2 = get_tag_index(4 * TAG_CONST, pc);
+  if(taggedPT_2[index2].usage != 0 && taggedPT_2[index2].tag == tag2) {
+    return &taggedPT_2[index2]; 
+  }
+  if(taggedPT_1[index1].usage != 0 && taggedPT_1[index1].tag == tag1) {
+    return &taggedPT_1[index1];
+  }
+  if(taggedPT_0[index0].usage != 0 && taggedPT_0[index0].tag == tag0) {
+    return &taggedPT_0[index0];
+  } 
+  return NULL; 
+}
+
 uint32_t get_level(uint32_t pc) {
   uint32_t tag0 = get_tag(TAG_CONST, pc); 
   uint32_t tag1 = get_tag(2 * TAG_CONST, pc); 
@@ -249,14 +268,17 @@ uint8_t tage_prediction(uint32_t pc) {
   uint32_t index0 = get_tag_index(TAG_CONST, pc); 
   uint32_t index1 = get_tag_index(2 * TAG_CONST, pc);
   uint32_t index2 = get_tag_index(4 * TAG_CONST, pc);
+  uint8_t count = 0;
   if(taggedPT_2[index2].usage > 0 && taggedPT_2[index2].tag == tag2) {
-    return taggedPT_2[index2].counter > 1 ? TAKEN : NOTTAKEN; 
+    count++;  
   }
   if(taggedPT_1[index1].usage > 0 && taggedPT_1[index1].tag == tag1) {
-    return taggedPT_1[index1].counter > 1 ? TAKEN : NOTTAKEN;
+    if(count == 1) return taggedPT_1[index1].counter >= 0 ? TAKEN : NOTTAKEN;
+    count++; 
   }
   if(taggedPT_0[index0].usage > 0 && taggedPT_0[index0].tag == tag0) {
-    return taggedPT_0[index0].counter > 1 ? TAKEN : NOTTAKEN;
+    if(count == 1)return taggedPT_0[index0].counter >= 0 ? TAKEN : NOTTAKEN;
+    count++; 
   }
   return gshare_prediction(pc); 
 }
@@ -273,11 +295,11 @@ uint8_t tage_altpred(uint32_t pc) {
     count++;  
   }
   if(taggedPT_1[index1].usage > 0 && taggedPT_1[index1].tag == tag1) {
-    if(count == 1) return taggedPT_1[index1].counter > 1 ? TAKEN : NOTTAKEN;
+    if(count == 1) return taggedPT_1[index1].counter >= 0 ? TAKEN : NOTTAKEN;
     count++; 
   }
   if(taggedPT_0[index0].usage > 0 && taggedPT_0[index0].tag == tag0) {
-    if(count == 1) return taggedPT_0[index0].counter > 1 ? TAKEN : NOTTAKEN;
+    if(count == 1) return taggedPT_0[index0].counter >= 0 ? TAKEN : NOTTAKEN;
     count++; 
   }
   return gshare_prediction(pc); 
@@ -375,19 +397,20 @@ void train_tournament(uint32_t pc, uint8_t outcome) {
 void train_tage(uint32_t pc, uint8_t outcome) {
   uint8_t pred = tage_prediction(pc); 
   uint8_t altpred = tage_altpred(pc); 
+  // Entry* altitem = get_tagged_altitem(pc); 
   Entry* item = get_tagged_item(pc); 
   uint32_t level = get_level(pc); 
 
   if(pred != altpred && item != NULL) {
-    if(pred == outcome) {
+    if(pred == outcome && item->usage != 3) {
       item->usage++; 
     }else {
       item->usage--; 
     }
   }
 
-  if(item != NULL && outcome == TAKEN && item->counter < ST) item->counter++;
-  else if (item != NULL && outcome == NOTTAKEN && item->counter > SN)item->counter--; 
+  if(item != NULL && outcome == TAKEN && item->counter < 3) item->counter++;
+  else if (item != NULL && outcome == NOTTAKEN && item->counter > -3)item->counter--; 
 
   uint32_t index0 = get_tag_index(TAG_CONST, pc);
   uint32_t index1 = get_tag_index(2 * TAG_CONST, pc);
