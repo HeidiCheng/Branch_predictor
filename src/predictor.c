@@ -141,6 +141,13 @@ uint8_t tournament_prediction(uint32_t pc) {
   return gshare_prediction(pc); 
 }
 
+uint32_t choice_get_index() {
+  uint32_t table_entries = 1 << ghistoryBits;
+  // use & to get n LSBs
+  uint32_t c_index = g_history_reg & (table_entries - 1);
+  return c_index;
+}
+
 // TAGE branch predictor
 uint32_t get_num_of_digits(uint32_t num) {
   uint32_t count = 0; 
@@ -202,6 +209,15 @@ uint8_t tage_prediction(uint32_t pc) {
   return TAKEN; 
 }
 
+uint8_t custom_prediction(uint32_t pc) {
+
+  uint8_t choice = choicePredictor[gshare_get_index(pc)] & 2;
+  if(choice == 1) { 
+    return local_prediction(pc); 
+  } 
+  return gshare_prediction(pc); 
+}
+
 // Make a prediction for conditional branch instruction at PC 'pc'
 // Returning TAKEN indicates a prediction of taken; returning NOTTAKEN
 // indicates a prediction of not taken
@@ -221,6 +237,7 @@ make_prediction(uint32_t pc)
     case TOURNAMENT:
       return tournament_prediction(pc); 
     case CUSTOM:
+      return custom_prediction(pc);
     default:
       break;
   }
@@ -290,6 +307,29 @@ void train_tournament(uint32_t pc, uint8_t outcome) {
  
 }
 
+void train_choice_custom(uint32_t pc, uint8_t outcome) {
+  uint32_t index = gshare_get_index(pc);
+  uint8_t choice = choicePredictor[index] & 2;
+  uint8_t localPrediction = local_prediction(pc); 
+  uint8_t globalPrediction = gshare_prediction(pc); 
+  if(choice == 0 && localPrediction != outcome && globalPrediction == outcome) {
+    choicePredictor[index]++; 
+  }else if(choice == 1 && localPrediction == outcome && globalPrediction != outcome) {
+    choicePredictor[index]--; 
+  }
+}
+
+void train_custom(uint32_t pc, uint8_t outcome) {
+  // 1. local predictor
+  train_local(pc, outcome); 
+
+  // 2. global predictor
+  train_gshare(pc, outcome); 
+
+  // 3. choice predictor
+  train_choice_custom(pc, outcome);
+}
+
 // Train the predictor the last executed branch at PC 'pc' and with
 // outcome 'outcome' (true indicates that the branch was taken, false
 // indicates that the branch was not taken)
@@ -307,6 +347,7 @@ train_predictor(uint32_t pc, uint8_t outcome)
     case TOURNAMENT:
       train_tournament(pc, outcome); 
     case CUSTOM:
+      train_custom(pc, outcome);
     default:
       break;
   }
