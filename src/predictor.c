@@ -426,7 +426,7 @@ void train_tage(uint32_t pc, uint8_t outcome) {
       if(pred != altpred) {
         update_usage_at_level(pc, level, (outcome == altpred)? 1 : -1); 
         // TODO: additional to paper
-        update_counter_at_level(pc, level, (outcome == TAKEN)? 1 : -1);
+        // update_counter_at_level(pc, level, (outcome == TAKEN)? 1 : -1);
       }
     }
   }
