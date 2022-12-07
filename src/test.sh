@@ -14,6 +14,6 @@ for file in ${traces[@]}; do
     bunzip2 -kc $tracePath | ./predictor --gshare:13
     echo -e "\nTournament"
     bunzip2 -kc $tracePath | ./predictor --tournament:9:10:10
-    # echo -e "\nCustom"
-    # bunzip2 -kc $tracePath | ./predictor --custom:9:10:10
+    echo -e "\nCustom"
+    bunzip2 -kc $tracePath | ./predictor --custom
 done

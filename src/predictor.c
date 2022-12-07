@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
+#include <stdbool.h>
 #include "predictor.h"
 
 //
@@ -51,7 +52,7 @@ uint8_t *choicePredictor = NULL;
 
 // tage predictor
 typedef struct {
-  int8_t counter; 
+  uint8_t counter; 
   uint16_t tag; 
   uint8_t usage; 
 } Entry; 
@@ -126,6 +127,14 @@ uint32_t gshare_get_index(uint32_t pc) {
   return g_index;
 }
 
+
+uint32_t choice_get_index() {
+  uint32_t table_entries = 1 << ghistoryBits;
+  // use & to get n LSBs
+  uint32_t c_index = g_history_reg & (table_entries - 1);
+  return c_index;
+}
+
 // GSHARE branch predictor
 uint8_t gshare_prediction(uint32_t pc) {
   uint32_t g_index = gshare_get_index(pc);
@@ -133,7 +142,7 @@ uint8_t gshare_prediction(uint32_t pc) {
   return (g_prediction >= 2) ? 1 : 0;
 }
 
-uint8_t tournament_prediction(uint32_t pc) {
+uint8_t tournament_prediction(uint32_t pc) { 
   uint8_t choice = choicePredictor[choice_get_index()] & 2;
   if(choice == 1) { 
     return local_prediction(pc); 
@@ -194,12 +203,84 @@ uint8_t get_tag(uint8_t g_bits, uint32_t pc) {
   return (pc ^ hashed ^ hashedShift) & tableEntries; 
 }
 
-uint8_t tage_prediction(uint32_t pc) {
+Entry *get_tagged_item(uint32_t pc) {
+  uint32_t tag0 = get_tag(TAG_CONST, pc); 
+  uint32_t tag1 = get_tag(2 * TAG_CONST, pc); 
+  uint32_t tag2 = get_tag(4 * TAG_CONST, pc); 
   uint32_t index0 = get_tag_index(TAG_CONST, pc); 
   uint32_t index1 = get_tag_index(2 * TAG_CONST, pc);
   uint32_t index2 = get_tag_index(4 * TAG_CONST, pc);
+  if(taggedPT_2[index2].usage != 0 && taggedPT_2[index2].tag == tag2) {
+    return &taggedPT_2[index2]; 
+  }
+  if(taggedPT_1[index1].usage != 0 && taggedPT_1[index1].tag == tag1) {
+    return &taggedPT_1[index1];
+  }
+  if(taggedPT_0[index0].usage != 0 && taggedPT_0[index0].tag == tag0) {
+    return &taggedPT_0[index0];
+  } 
+  return NULL; 
+}
 
-  return TAKEN; 
+uint32_t get_level(uint32_t pc) {
+  uint32_t tag0 = get_tag(TAG_CONST, pc); 
+  uint32_t tag1 = get_tag(2 * TAG_CONST, pc); 
+  uint32_t tag2 = get_tag(4 * TAG_CONST, pc); 
+  uint32_t index0 = get_tag_index(TAG_CONST, pc); 
+  uint32_t index1 = get_tag_index(2 * TAG_CONST, pc);
+  uint32_t index2 = get_tag_index(4 * TAG_CONST, pc);
+  if(taggedPT_2[index2].usage > 0 && taggedPT_2[index2].tag == tag2) {
+    return TAG_CONST * 4; 
+  }
+  if(taggedPT_1[index1].usage > 0 && taggedPT_1[index1].tag == tag1) {
+    return TAG_CONST * 2;
+  }
+  if(taggedPT_0[index0].usage > 0 && taggedPT_0[index0].tag == tag0) {
+    return TAG_CONST;
+  } 
+  return 0; 
+}
+
+
+uint8_t tage_prediction(uint32_t pc) {
+  uint32_t tag0 = get_tag(TAG_CONST, pc); 
+  uint32_t tag1 = get_tag(2 * TAG_CONST, pc); 
+  uint32_t tag2 = get_tag(4 * TAG_CONST, pc); 
+  uint32_t index0 = get_tag_index(TAG_CONST, pc); 
+  uint32_t index1 = get_tag_index(2 * TAG_CONST, pc);
+  uint32_t index2 = get_tag_index(4 * TAG_CONST, pc);
+  if(taggedPT_2[index2].usage > 0 && taggedPT_2[index2].tag == tag2) {
+    return taggedPT_2[index2].counter > 1 ? TAKEN : NOTTAKEN; 
+  }
+  if(taggedPT_1[index1].usage > 0 && taggedPT_1[index1].tag == tag1) {
+    return taggedPT_1[index1].counter > 1 ? TAKEN : NOTTAKEN;
+  }
+  if(taggedPT_0[index0].usage > 0 && taggedPT_0[index0].tag == tag0) {
+    return taggedPT_0[index0].counter > 1 ? TAKEN : NOTTAKEN;
+  }
+  return gshare_prediction(pc); 
+}
+
+uint8_t tage_altpred(uint32_t pc) {
+  uint32_t tag0 = get_tag(TAG_CONST, pc); 
+  uint32_t tag1 = get_tag(2 * TAG_CONST, pc); 
+  uint32_t tag2 = get_tag(4 * TAG_CONST, pc); 
+  uint32_t index0 = get_tag_index(TAG_CONST, pc); 
+  uint32_t index1 = get_tag_index(2 * TAG_CONST, pc);
+  uint32_t index2 = get_tag_index(4 * TAG_CONST, pc);
+  uint8_t count = 0; 
+  if(taggedPT_2[index2].usage > 0 && taggedPT_2[index2].tag == tag2) {
+    count++;  
+  }
+  if(taggedPT_1[index1].usage > 0 && taggedPT_1[index1].tag == tag1) {
+    if(count == 1) return taggedPT_1[index1].counter > 1 ? TAKEN : NOTTAKEN;
+    count++; 
+  }
+  if(taggedPT_0[index0].usage > 0 && taggedPT_0[index0].tag == tag0) {
+    if(count == 1) return taggedPT_0[index0].counter > 1 ? TAKEN : NOTTAKEN;
+    count++; 
+  }
+  return gshare_prediction(pc); 
 }
 
 // Make a prediction for conditional branch instruction at PC 'pc'
@@ -221,6 +302,7 @@ make_prediction(uint32_t pc)
     case TOURNAMENT:
       return tournament_prediction(pc); 
     case CUSTOM:
+      return tage_prediction(pc);  
     default:
       break;
   }
@@ -290,6 +372,52 @@ void train_tournament(uint32_t pc, uint8_t outcome) {
  
 }
 
+void train_tage(uint32_t pc, uint8_t outcome) {
+  uint8_t pred = tage_prediction(pc); 
+  uint8_t altpred = tage_altpred(pc); 
+  Entry* item = get_tagged_item(pc); 
+  uint32_t level = get_level(pc); 
+
+  if(pred != altpred && item != NULL) {
+    if(pred == outcome) {
+      item->usage++; 
+    }else {
+      item->usage--; 
+    }
+  }
+
+  if(item != NULL && outcome == TAKEN && item->counter < ST) item->counter++;
+  else if (item != NULL && outcome == NOTTAKEN && item->counter > SN)item->counter--; 
+
+  uint32_t index0 = get_tag_index(TAG_CONST, pc);
+  uint32_t index1 = get_tag_index(2 * TAG_CONST, pc);
+  uint32_t index2 = get_tag_index(4 * TAG_CONST, pc);
+
+  if(pred != outcome) {
+    if(level == (TAG_CONST * 4)) {
+      taggedPT_0[index0].usage--; 
+      taggedPT_1[index1].usage--; 
+      taggedPT_2[index2].usage--;
+    }else if(level == (TAG_CONST * 2)) {
+      taggedPT_2[index2].counter = WT; 
+      taggedPT_2[index2].tag = get_tag(TAG_CONST * 4, pc); 
+      // TODO: not sure whether to set usage to 0 in the beginning
+      taggedPT_2[index2].usage = 1; 
+    }else if (level == TAG_CONST){
+      taggedPT_1[index1].counter = WT; 
+      taggedPT_1[index1].tag = get_tag(TAG_CONST * 2, pc); 
+      // TODO: not sure whether to set usage to 0 in the beginning
+      taggedPT_1[index1].usage = 1; 
+    } else {
+      // Set to weak correct in the beginning
+      taggedPT_0[index0].counter = WT; 
+      taggedPT_0[index0].tag = get_tag(TAG_CONST, pc); 
+      // TODO: not sure whether to set usage to 0 in the beginning
+      taggedPT_0[index0].usage = 1;
+    }
+  }
+}
+
 // Train the predictor the last executed branch at PC 'pc' and with
 // outcome 'outcome' (true indicates that the branch was taken, false
 // indicates that the branch was not taken)
@@ -306,7 +434,10 @@ train_predictor(uint32_t pc, uint8_t outcome)
       return;
     case TOURNAMENT:
       train_tournament(pc, outcome); 
+      return; 
     case CUSTOM:
+      train_tage(pc, outcome); 
+      return; 
     default:
       break;
   }
@@ -324,5 +455,14 @@ void clean_predictor() {
   }
   if(choicePredictor != NULL){
     free(choicePredictor); 
+  }
+  if(taggedPT_0 != NULL){
+    free(taggedPT_0); 
+  }
+  if(taggedPT_1 != NULL){
+    free(taggedPT_1); 
+  }
+  if(taggedPT_2 != NULL){
+    free(taggedPT_2); 
   }
 }
