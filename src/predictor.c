@@ -64,6 +64,19 @@ Entry *taggedPT_2 = NULL;
 uint32_t totalWeights = 20; 
 uint32_t weight = 5; 
 
+// -----------------------------------// 
+//         Support functions          // 
+// -----------------------------------//
+uint32_t power(uint32_t base, uint32_t exp) {
+  uint32_t result = 1; 
+  while(exp > 0) {
+    result *= base; 
+    exp--; 
+  }
+  return result; 
+}
+
+
 //------------------------------------//
 //        Predictor Functions         //
 //------------------------------------//
@@ -76,9 +89,9 @@ init_predictor()
   //
   //TODO: Initialize Branch Predictor Data Structures
   //
-  size_t gpSize = pow(2, ghistoryBits); 
-  size_t lhSize = pow(2, pcIndexBits); 
-  size_t lpSize = pow(2, lhistoryBits); 
+  size_t gpSize = power(2, ghistoryBits); 
+  size_t lhSize = power(2, pcIndexBits); 
+  size_t lpSize = power(2, lhistoryBits); 
   // init for gshare
   globalPHT = (uint8_t*)malloc(sizeof(uint8_t)*gpSize); 
   memset(globalPHT, 0, sizeof(uint8_t)*gpSize);
@@ -165,7 +178,7 @@ uint32_t get_folded(uint32_t num, uint32_t numOfDigits){
   uint32_t tmp = 0; 
   uint32_t count = 0; 
   while(num != 0) {
-    tmp += (num%10) * pow(10, count); 
+    tmp += (num%10) * power(10, count); 
     num /= 10; 
     count++; 
     if(count == numOfDigits){
@@ -174,7 +187,7 @@ uint32_t get_folded(uint32_t num, uint32_t numOfDigits){
       count = 0;
     }
   }
-  uint32_t upperBound = pow(10, numOfDigits) - 1; 
+  uint32_t upperBound = power(10, numOfDigits) - 1; 
   while(result > upperBound) {
     result /= 10; 
   }
@@ -188,7 +201,7 @@ uint32_t fold_hash(uint32_t h, uint32_t m) {
 }
 
 uint8_t get_tag_index(uint8_t g_bits, uint32_t pc) {
-  uint32_t tableSize = pow(2, g_bits); 
+  uint32_t tableSize = power(2, g_bits); 
   uint32_t hashed = fold_hash(g_history_reg, tableSize); 
   uint32_t tableEntries = (1 << g_bits) - 1;
   // TODO: Not complete
@@ -196,7 +209,7 @@ uint8_t get_tag_index(uint8_t g_bits, uint32_t pc) {
 }
 
 uint8_t get_tag(uint8_t g_bits, uint32_t pc) {
-  uint32_t tableSize = pow(2, g_bits); 
+  uint32_t tableSize = power(2, g_bits); 
   uint32_t hashed = fold_hash(g_history_reg, tableSize); 
   uint32_t hashedShift = fold_hash(g_history_reg, tableSize - 1) << 1; 
   uint32_t tableEntries = (1 << g_bits) - 1;
