@@ -39,34 +39,30 @@ int verbose;
 //TODO: Add your own Branch Predictor data structures here
 //
 
-// Data Structures for Tournament branch predictor
-struct GlobalPredictor {
-  uint32_t historyRegister; 
-  // TODO: Find a way to use only two bits
-  // Global Prediction Table: 4096 x 2 bits
-  // uint8_t pht[4096]; // Pattern History Table
-  uint8_t *pht; 
-}; 
-
-struct LocalPredictor {
-  // TODO: Find a way to use only 10 bits
-  // uint16_t lht[1024]; // Local History Table
-  uint32_t *lht; 
-  // TODO: Find a way to use only 3 bits
-  // uint8_t lpt[1024]; // Local Prediction Table
-  uint8_t *lpt; 
-}; 
-
 // gshare
 uint32_t g_history_reg;
 // uint8_t *g_PHT; //globalPHT
 
 // tournament predictor
-uint32_t globalHistoryRegister; 
 uint8_t *globalPHT = NULL;
 uint32_t *localLHT = NULL; 
 uint8_t *localLPT = NULL;   
 uint8_t *choicePredictor = NULL; 
+
+// tage predictor
+typedef struct {
+  int8_t counter; 
+  uint16_t tag; 
+  uint8_t usage; 
+} Entry; 
+
+Entry *taggedPT_0 = NULL; 
+Entry *taggedPT_1 = NULL; 
+Entry *taggedPT_2 = NULL; 
+
+// custom
+uint32_t totalWeights = 20; 
+uint32_t weight = 5; 
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -83,15 +79,10 @@ init_predictor()
   size_t gpSize = pow(2, ghistoryBits); 
   size_t lhSize = pow(2, pcIndexBits); 
   size_t lpSize = pow(2, lhistoryBits); 
-  // Init global predictor
+  // init for gshare
   globalPHT = (uint8_t*)malloc(sizeof(uint8_t)*gpSize); 
   memset(globalPHT, 0, sizeof(uint8_t)*gpSize);
-  // globalHistoryRegister = ghistoryBits == 32 ? 0 : (1 << ghistoryBits) - 1; 
-  globalHistoryRegister = 0;
-  
-  // init for gshare
   g_history_reg = 0;
-
 
   // Init local predictor
   localLHT = (uint32_t*)malloc(sizeof(uint32_t)*lhSize);
@@ -102,39 +93,28 @@ init_predictor()
 
   // Init chioce predictor
   choicePredictor = (uint8_t*)malloc(sizeof(uint8_t)*gpSize); 
-  // Prefer to choose result from local predictor in the beginning
+  // Prefer to choose result from global predictor in the beginning
   memset(choicePredictor, 0, sizeof(uint8_t)*gpSize); 
+
+  // Init custom predictor 
+  taggedPT_0 = malloc(TAG_CONST * sizeof(Entry)); 
+  taggedPT_1 = malloc(TAG_CONST * 2 * sizeof(Entry)); 
+  taggedPT_2 = malloc(TAG_CONST * 4 * sizeof(Entry)); 
+  memset(taggedPT_0, 0, TAG_CONST * sizeof(Entry)); 
+  memset(taggedPT_1, 0, TAG_CONST * 2 * sizeof(Entry)); 
+  memset(taggedPT_2, 0, TAG_CONST * 4 * sizeof(Entry)); 
 }
 
 // Local Prediction
 uint8_t local_prediction(uint32_t pc) {
   if(pcIndexBits != 32) {
     uint32_t pcMask = (1 << pcIndexBits) - 1;
-    //printf("PC: %d, pcMask: %d\n", pc, pcMask); 
     pc &= pcMask; 
   }
   uint32_t indexLPT = localLHT[pc]; 
-  // printf("indexLPT: %d\n", indexLPT); 
   // Use the first bit as the prediction
-  uint8_t localPrediction = localLPT[indexLPT] & 2; 
-  // printf("indexLPT: %d\n", indexLPT); 
-  
+  uint8_t localPrediction = localLPT[indexLPT] & 2;  
   return localPrediction == 2; 
-}
-
-// Global Prediction
-uint8_t global_prediction() {
-  uint8_t globalPrediction = globalPHT[globalHistoryRegister] & 2; 
-  return globalPrediction == 2; 
-}
-
-uint8_t tournament_prediction(uint32_t pc) {
-  uint8_t choice = choicePredictor[globalHistoryRegister] & 2;
-  // printf("Chioce: %d\n", choice); 
-  if(choice == 0) { 
-    return local_prediction(pc); 
-  } 
-  return global_prediction(); 
 }
 
 uint32_t gshare_get_index(uint32_t pc) {
@@ -151,6 +131,75 @@ uint8_t gshare_prediction(uint32_t pc) {
   uint32_t g_index = gshare_get_index(pc);
   uint8_t g_prediction = globalPHT[g_index];
   return (g_prediction >= 2) ? 1 : 0;
+}
+
+uint8_t tournament_prediction(uint32_t pc) {
+  uint8_t choice = choicePredictor[choice_get_index()] & 2;
+  if(choice == 1) { 
+    return local_prediction(pc); 
+  } 
+  return gshare_prediction(pc); 
+}
+
+// TAGE branch predictor
+uint32_t get_num_of_digits(uint32_t num) {
+  uint32_t count = 0; 
+  while(num != 0) {
+    count++; 
+    num /= 10; 
+  }
+  return count; 
+} 
+
+uint32_t get_folded(uint32_t num, uint32_t numOfDigits){
+  uint32_t result = 0; 
+  uint32_t tmp = 0; 
+  uint32_t count = 0; 
+  while(num != 0) {
+    tmp += (num%10) * pow(10, count); 
+    num /= 10; 
+    count++; 
+    if(count == numOfDigits){
+      result += tmp; 
+      tmp = 0; 
+      count = 0;
+    }
+  }
+  uint32_t upperBound = pow(10, numOfDigits) - 1; 
+  while(result > upperBound) {
+    result /= 10; 
+  }
+  return result; 
+}
+
+uint32_t fold_hash(uint32_t h, uint32_t m) {
+  uint32_t numOfDigits = get_num_of_digits(m); 
+  uint32_t foldedNum = get_folded(h, numOfDigits); 
+  return foldedNum % m; 
+}
+
+uint8_t get_tag_index(uint8_t g_bits, uint32_t pc) {
+  uint32_t tableSize = pow(2, g_bits); 
+  uint32_t hashed = fold_hash(g_history_reg, tableSize); 
+  uint32_t tableEntries = (1 << g_bits) - 1;
+  // TODO: Not complete
+  return (pc ^ hashed) & tableEntries; 
+}
+
+uint8_t get_tag(uint8_t g_bits, uint32_t pc) {
+  uint32_t tableSize = pow(2, g_bits); 
+  uint32_t hashed = fold_hash(g_history_reg, tableSize); 
+  uint32_t hashedShift = fold_hash(g_history_reg, tableSize - 1) << 1; 
+  uint32_t tableEntries = (1 << g_bits) - 1;
+  return (pc ^ hashed ^ hashedShift) & tableEntries; 
+}
+
+uint8_t tage_prediction(uint32_t pc) {
+  uint32_t index0 = get_tag_index(TAG_CONST, pc); 
+  uint32_t index1 = get_tag_index(2 * TAG_CONST, pc);
+  uint32_t index2 = get_tag_index(4 * TAG_CONST, pc);
+
+  return TAKEN; 
 }
 
 // Make a prediction for conditional branch instruction at PC 'pc'
@@ -196,18 +245,17 @@ void train_gshare(uint32_t pc, uint8_t outcome) {
   }
 }
 
-void train_tournament(uint32_t pc, uint8_t outcome) {
-  // Update tournament predictor
-  // 1. local predictor
+void train_local(uint32_t pc, uint8_t outcome) {
+  uint32_t pcMask = 0; 
   if(pcIndexBits != 32) {
     uint32_t pcMask = (1 << pcIndexBits) - 1;
     pc &= pcMask; 
   }
-  localLHT[pc] = localLHT[pc] >> 1; 
-  // Set the first bit to 1 when outcome is TAKEN
-  if(outcome == TAKEN){
-    localLHT[pc] = localLHT[pc] | (1 << (pcIndexBits - 1)); 
-  }
+  uint32_t localUpdate = localLHT[pc]; 
+  localUpdate = localUpdate << 1; 
+  localUpdate |= outcome;   
+  localLHT[pc] = localUpdate & pcMask; 
+
   uint32_t localHistory = localLHT[pc]; 
   if(outcome == TAKEN && localLPT[localHistory] != ST){
     localLPT[localHistory]++; 
@@ -215,28 +263,31 @@ void train_tournament(uint32_t pc, uint8_t outcome) {
   if(outcome == NOTTAKEN && localLPT[localHistory] != SN) {
     localLPT[localHistory]--; 
   }
+}
+
+void train_choice(uint32_t pc, uint8_t outcome) {
+  uint32_t index = choice_get_index(); 
+  uint8_t choice = choicePredictor[index] & 2;
+  uint8_t localPrediction = local_prediction(pc); 
+  uint8_t globalPrediction = gshare_prediction(pc); 
+  if(choice == 0 && localPrediction != outcome && globalPrediction == outcome) {
+    choicePredictor[index]++; 
+  }else if(choice == 1 && localPrediction == outcome && globalPrediction != outcome) {
+    choicePredictor[index]--; 
+  }
+}
+
+void train_tournament(uint32_t pc, uint8_t outcome) {
+  // Update tournament predictor
+  // 1. local predictor
+  train_local(pc, outcome); 
 
   // 2. global predictor
-  globalHistoryRegister = globalHistoryRegister >> 1; 
-  if(outcome == TAKEN) {
-    globalHistoryRegister = globalHistoryRegister | (1 << (ghistoryBits - 1)); 
-  }
-  if(outcome == TAKEN && globalPHT[globalHistoryRegister] != ST){
-    globalPHT[globalHistoryRegister]++; 
-  }
-  if(outcome == NOTTAKEN && globalPHT[globalHistoryRegister] != SN) {
-    globalPHT[globalHistoryRegister]--; 
-  }
+  train_gshare(pc, outcome); 
 
   // 3. choice predictor
-  uint8_t choice = choicePredictor[globalHistoryRegister] & 2;
-  uint8_t localPrediction = local_prediction(pc); 
-  uint8_t globalPrediction = global_prediction(); 
-  if(choice == 0 && localPrediction != outcome && globalPrediction == outcome) {
-    choicePredictor[globalHistoryRegister]++; 
-  }else if(choice == 1 && localPrediction == outcome && globalPrediction != outcome) {
-    choicePredictor[globalHistoryRegister]--; 
-  }
+  train_choice(pc, outcome); 
+ 
 }
 
 // Train the predictor the last executed branch at PC 'pc' and with
@@ -259,8 +310,6 @@ train_predictor(uint32_t pc, uint8_t outcome)
     default:
       break;
   }
-
-  
 }
 
 void clean_predictor() {
