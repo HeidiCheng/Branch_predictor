@@ -133,6 +133,13 @@ uint8_t gshare_prediction(uint32_t pc) {
   return (g_prediction >= 2) ? 1 : 0;
 }
 
+uint32_t choice_get_index() {
+  uint32_t table_entries = 1 << ghistoryBits;
+  // use & to get n LSBs
+  uint32_t c_index = g_history_reg & (table_entries - 1);
+  return c_index;
+}
+
 uint8_t tournament_prediction(uint32_t pc) {
   uint8_t choice = choicePredictor[choice_get_index()] & 2;
   if(choice == 1) { 
@@ -141,12 +148,7 @@ uint8_t tournament_prediction(uint32_t pc) {
   return gshare_prediction(pc); 
 }
 
-uint32_t choice_get_index() {
-  uint32_t table_entries = 1 << ghistoryBits;
-  // use & to get n LSBs
-  uint32_t c_index = g_history_reg & (table_entries - 1);
-  return c_index;
-}
+
 
 // TAGE branch predictor
 uint32_t get_num_of_digits(uint32_t num) {
