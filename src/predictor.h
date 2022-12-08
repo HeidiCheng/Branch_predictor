@@ -39,6 +39,13 @@ extern const char *bpName[];
 #define WT  2			// predict T, weak taken
 #define ST  3			// predict T, strong taken
 
+// Definition for custom predictor
+#define BASE_SIZE 256
+#define BASE_BITS 8
+#define USEFUL_CONST 0
+#define TAG_WIDTH 9
+#define USAGE_INIT 1
+
 //------------------------------------//
 //      Predictor Configuration       //
 //------------------------------------//
