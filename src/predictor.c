@@ -78,6 +78,7 @@ init_predictor()
   size_t lpSize = pow(2, lhistoryBits); 
   // init for gshare
   globalPHT = (uint8_t*)malloc(sizeof(uint8_t)*gpSize); 
+  // init global history to not taken
   memset(globalPHT, 0, sizeof(uint8_t)*gpSize);
   g_history_reg = 0;
 
@@ -380,15 +381,12 @@ void train_choice(uint32_t pc, uint8_t outcome) {
 
 void train_tournament(uint32_t pc, uint8_t outcome) {
   // Update tournament predictor
-  // 1. local predictor
-  train_local(pc, outcome); 
-
-  // 2. global predictor
-  train_gshare(pc, outcome); 
-
-  // 3. choice predictor
+  // 1. choice predictor
   train_choice(pc, outcome); 
- 
+  // 2. local predictor
+  train_local(pc, outcome); 
+  // 3. global predictor
+  train_gshare(pc, outcome);
 }
 
 void train_tage(uint32_t pc, uint8_t outcome) {
