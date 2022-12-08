@@ -140,7 +140,7 @@ uint32_t choice_get_index() {
 
 uint8_t tournament_prediction(uint32_t pc) { 
   uint8_t choice = choicePredictor[choice_get_index()] & 2;
-  if(choice == 1) { 
+  if(choice == 0) { 
     return local_prediction(pc); 
   } 
   return gshare_prediction(pc); 
@@ -348,13 +348,9 @@ void train_gshare(uint32_t pc, uint8_t outcome) {
 void train_local(uint32_t pc, uint8_t outcome) {
   uint32_t pcMask = 0; 
   if(pcIndexBits != 32) {
-    uint32_t pcMask = (1 << pcIndexBits) - 1;
+    pcMask = (1 << pcIndexBits) - 1;
     pc &= pcMask; 
   }
-  uint32_t localUpdate = localLHT[pc]; 
-  localUpdate = localUpdate << 1; 
-  localUpdate |= outcome;   
-  localLHT[pc] = localUpdate & pcMask; 
 
   uint32_t localHistory = localLHT[pc]; 
   if(outcome == TAKEN && localLPT[localHistory] != ST){
@@ -363,6 +359,11 @@ void train_local(uint32_t pc, uint8_t outcome) {
   if(outcome == NOTTAKEN && localLPT[localHistory] != SN) {
     localLPT[localHistory]--; 
   }
+
+  uint32_t localUpdate = localLHT[pc]; 
+  localUpdate = localUpdate << 1; 
+  localUpdate |= outcome;   
+  localLHT[pc] = localUpdate & pcMask; 
 }
 
 void train_choice(uint32_t pc, uint8_t outcome) {
@@ -372,7 +373,7 @@ void train_choice(uint32_t pc, uint8_t outcome) {
   uint8_t globalPrediction = gshare_prediction(pc); 
   if(choice == 0 && localPrediction != outcome && globalPrediction == outcome) {
     choicePredictor[index]++; 
-  }else if(choice == 1 && localPrediction == outcome && globalPrediction != outcome) {
+  }else if(choice == 2 && localPrediction == outcome && globalPrediction != outcome) {
     choicePredictor[index]--; 
   }
 }
