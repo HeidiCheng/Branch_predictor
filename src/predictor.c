@@ -173,7 +173,8 @@ uint32_t get_folded(uint32_t num, uint32_t numOfDigits){
   }
   uint32_t upperBound = pow(10, numOfDigits) - 1; 
   while(result > upperBound) {
-    result /= 10; 
+    // result /= 10; 
+    result -= (upperBound + 1); 
   }
   return result; 
 }
@@ -221,7 +222,7 @@ bool isHit(uint32_t pc, int level) {
   return false; 
 }
 
-uint32_t get_level(uint32_t pc) {
+int32_t get_level(uint32_t pc) {
   if(isHit(pc, 2)) {
     return 2; 
   }
@@ -231,7 +232,7 @@ uint32_t get_level(uint32_t pc) {
   if(isHit(pc, 0)) {
     return 0;
   } 
-  return 0; 
+  return -1; 
 }
 
 uint32_t get_pred_at_level(uint32_t pc, uint32_t level) {
@@ -243,7 +244,7 @@ uint32_t get_pred_at_level(uint32_t pc, uint32_t level) {
     case 2:
       return taggedPT_2[get_tag_index(BASE_BITS + 2, pc)].counter >= 0 ? TAKEN : NOTTAKEN;
     default:
-      return 1; 
+      return TAKEN; 
   }
 }
 
@@ -391,47 +392,49 @@ void train_tournament(uint32_t pc, uint8_t outcome) {
 
 void train_tage(uint32_t pc, uint8_t outcome) {
   uint8_t pred = tage_prediction(pc); 
-  uint32_t level = get_level(pc); 
+  int32_t level = get_level(pc); 
   uint8_t altpred; 
 
-  // Update usefulness of alternate predictions 
+  // Update counter of alternate predictions 
   for(int i = 0; i < level; i++) {
     if(isHit(pc, i)) {
-      altpred = get_pred_at_level(pc, i); 
-      // update_usage_at_level(pc, i, (outcome == altpred)? 1 : -1); 
       update_counter_at_level(pc, i, (outcome == TAKEN)? 1 : -1);
-      if(pred != altpred) {
-        update_usage_at_level(pc, level, (outcome == altpred)? 1 : -1); 
-        // TODO: additional to paper
-        // update_counter_at_level(pc, level, (outcome == TAKEN)? 1 : -1);
-      }
     }
   }
 
   // update item counter
   update_counter_at_level(pc, level, (outcome == TAKEN)? 1 : -1); 
+  if(level >= 0)update_usage_at_level(pc, level, (pred == outcome) ? 1 : -1);
 
   if(pred != outcome) {
     uint32_t index0 = get_tag_index(BASE_BITS, pc);
     uint32_t index1 = get_tag_index(BASE_BITS + 1, pc);
     uint32_t index2 = get_tag_index(BASE_BITS + 2, pc);
     uint32_t tag = get_tag(TAG_WIDTH, pc);
-    update_usage_at_level(pc, level, -1); 
-    if(level == 1) {
+    if(level == 2) {
+      for(int i = 0; i < level; i++) {
+        if(isHit(pc, i)) {
+          altpred = get_pred_at_level(pc, i); 
+          update_usage_at_level(pc, i, (outcome == altpred)? 1 : -1); 
+        }
+      }
+    }else if(level == 1) {
+      // Set to weak correct in the beginning
       taggedPT_2[index2].counter = 0; 
       taggedPT_2[index2].tag = tag; 
       taggedPT_2[index2].usage = USAGE_INIT; 
     }else if (level == 0){
+      // Set to weak correct in the beginning
       taggedPT_1[index1].counter = 0; 
       taggedPT_1[index1].tag = tag; 
       taggedPT_1[index1].usage = USAGE_INIT; 
-    } else {
+    } else if(level == -1){
       // Set to weak correct in the beginning
       taggedPT_0[index0].counter = 0; 
       taggedPT_0[index0].tag = tag; 
       taggedPT_0[index0].usage = USAGE_INIT;
     }
-  }
+  } 
 
   // Update base predictor
   train_gshare(pc, outcome); 

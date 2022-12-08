@@ -42,8 +42,8 @@ extern const char *bpName[];
 // Definition for custom predictor
 #define BASE_SIZE 256
 #define BASE_BITS 8
+#define TAG_WIDTH 11
 #define USEFUL_CONST 0
-#define TAG_WIDTH 9
 #define USAGE_INIT 1
 
 //------------------------------------//
