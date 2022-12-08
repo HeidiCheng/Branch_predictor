@@ -96,7 +96,7 @@ init_predictor()
   // Init custom predictor 
   taggedPT_0 = malloc(BASE_SIZE * sizeof(Entry)); 
   taggedPT_1 = malloc(BASE_SIZE * 2 * sizeof(Entry)); 
-  taggedPT_2 = malloc(BASE_SIZE * 4 * sizeof(Entry)); 
+  taggedPT_2 = malloc(BASE_SIZE * 4 * sizeof(Entry));  
   memset(taggedPT_0, 0, BASE_SIZE * sizeof(Entry)); 
   memset(taggedPT_1, 0, BASE_SIZE * 2 * sizeof(Entry)); 
   memset(taggedPT_2, 0, BASE_SIZE * 4 * sizeof(Entry)); 
@@ -187,7 +187,6 @@ uint8_t get_tag_index(uint8_t g_bits, uint32_t pc) {
   uint32_t tableSize = pow(2, g_bits); 
   uint32_t hashed = fold_hash(g_history_reg, tableSize); 
   uint32_t tableEntries = (1 << g_bits) - 1;
-  // TODO: Not complete
   return (pc ^ hashed) & tableEntries; 
 }
 
@@ -221,19 +220,6 @@ bool isHit(uint32_t pc, int level) {
   return false; 
 }
 
-Entry *get_tagged_item(uint32_t pc) {
-  if(isHit(pc, 2)) {
-    return &taggedPT_2[get_tag_index(BASE_BITS + 2, pc)]; 
-  }
-  if(isHit(pc, 1)) {
-    return &taggedPT_1[get_tag_index(BASE_BITS + 1, pc)];
-  }
-  if(isHit(pc, 0)) {
-    return &taggedPT_0[get_tag_index(BASE_BITS, pc)];
-  } 
-  return NULL; 
-}
-
 uint32_t get_level(uint32_t pc) {
   if(isHit(pc, 2)) {
     return 2; 
@@ -250,11 +236,11 @@ uint32_t get_level(uint32_t pc) {
 uint32_t get_pred_at_level(uint32_t pc, uint32_t level) {
   switch(level) {
     case 0:
-      return taggedPT_0[get_tag_index(BASE_BITS, pc)].counter > 0 ? 1 : 0; 
+      return taggedPT_0[get_tag_index(BASE_BITS, pc)].counter >= 0 ? TAKEN : NOTTAKEN; 
     case 1:
-      return taggedPT_1[get_tag_index(BASE_BITS + 1, pc)].counter > 0 ? 1 : 0;
+      return taggedPT_1[get_tag_index(BASE_BITS + 1, pc)].counter >= 0 ? TAKEN : NOTTAKEN;
     case 2:
-      return taggedPT_2[get_tag_index(BASE_BITS + 2, pc)].counter > 0 ? 1 : 0;
+      return taggedPT_2[get_tag_index(BASE_BITS + 2, pc)].counter >= 0 ? TAKEN : NOTTAKEN;
     default:
       return 1; 
   }
@@ -282,15 +268,22 @@ void update_usage_at_level(uint32_t pc, uint32_t level, uint32_t value) {
 }
 
 void update_counter_at_level(uint32_t pc, uint32_t level, int8_t value) {
+  uint32_t index; 
   switch(level) {
     case 0:
-      taggedPT_0[get_tag_index(BASE_BITS, pc)].counter += value;
+      index = get_tag_index(BASE_BITS, pc);
+      if(value == 1 && taggedPT_0[index].counter < 3) taggedPT_0[index].counter++;
+      if(value == -1 && taggedPT_0[index].counter > -3) taggedPT_0[index].counter--;
       return;  
     case 1:
-      taggedPT_1[get_tag_index(BASE_BITS + 1, pc)].counter += value;
+      index = get_tag_index(BASE_BITS + 1, pc);
+      if(value == 1 && taggedPT_1[index].counter < 3) taggedPT_1[index].counter++;
+      if(value == -1 && taggedPT_1[index].counter > -3) taggedPT_1[index].counter--;
       return; 
     case 2:
-      taggedPT_2[get_tag_index(BASE_BITS + 2, pc)].counter += value;
+      index = get_tag_index(BASE_BITS + 2, pc); 
+      if(value == 1 && taggedPT_2[index].counter < 3) taggedPT_2[index].counter++;
+      if(value == -1 && taggedPT_2[index].counter > -3) taggedPT_2[index].counter--;
       return; 
   }
 }
@@ -298,29 +291,13 @@ void update_counter_at_level(uint32_t pc, uint32_t level, int8_t value) {
 uint8_t tage_prediction(uint32_t pc) {
   // printf("Used Level: %d\n", get_level(pc)); 
   if(isHit(pc, 2)) {
-    return taggedPT_2[get_tag_index(BASE_BITS + 2, pc)].counter >= 0 ? TAKEN : NOTTAKEN; 
+    return get_pred_at_level(pc, 2); 
   }
   if(isHit(pc, 1)) {
-    return taggedPT_1[get_tag_index(BASE_BITS + 1, pc)].counter >= 0 ? TAKEN : NOTTAKEN;
+    return get_pred_at_level(pc, 1); 
   }
   if(isHit(pc, 0)) {
-    return taggedPT_0[get_tag_index(BASE_BITS, pc)].counter >= 0 ? TAKEN : NOTTAKEN;
-  }
-  return gshare_prediction(pc); 
-}
-
-uint8_t tage_altpred(uint32_t pc) {
-  uint8_t count = 0; 
-  if(isHit(pc, 2)) {
-    count++;  
-  }
-  if(isHit(pc, 1)) {
-    if(count == 1) return taggedPT_1[get_tag_index(BASE_BITS + 1, pc)].counter >= 0 ? TAKEN : NOTTAKEN;
-    count++; 
-  }
-  if(isHit(pc, 0)) {
-    if(count == 1) return taggedPT_0[get_tag_index(BASE_BITS + 1, pc)].counter >= 0 ? TAKEN : NOTTAKEN;
-    count++; 
+    return get_pred_at_level(pc, 0); 
   }
   return gshare_prediction(pc); 
 }
@@ -415,7 +392,6 @@ void train_tournament(uint32_t pc, uint8_t outcome) {
 
 void train_tage(uint32_t pc, uint8_t outcome) {
   uint8_t pred = tage_prediction(pc); 
-  Entry* item = get_tagged_item(pc); 
   uint32_t level = get_level(pc); 
   uint8_t altpred; 
 
@@ -423,6 +399,8 @@ void train_tage(uint32_t pc, uint8_t outcome) {
   for(int i = 0; i < level; i++) {
     if(isHit(pc, i)) {
       altpred = get_pred_at_level(pc, i); 
+      // update_usage_at_level(pc, i, (outcome == altpred)? 1 : -1); 
+      update_counter_at_level(pc, i, (outcome == TAKEN)? 1 : -1);
       if(pred != altpred) {
         update_usage_at_level(pc, level, (outcome == altpred)? 1 : -1); 
         // TODO: additional to paper
@@ -432,8 +410,7 @@ void train_tage(uint32_t pc, uint8_t outcome) {
   }
 
   // update item counter
-  if(item != NULL && outcome == TAKEN && item->counter < 3) item->counter++;
-  else if (item != NULL && outcome == NOTTAKEN && item->counter > -3)item->counter--;  
+  update_counter_at_level(pc, level, (outcome == TAKEN)? 1 : -1); 
 
   if(pred != outcome) {
     uint32_t index0 = get_tag_index(BASE_BITS, pc);
@@ -441,24 +418,18 @@ void train_tage(uint32_t pc, uint8_t outcome) {
     uint32_t index2 = get_tag_index(BASE_BITS + 2, pc);
     uint32_t tag = get_tag(TAG_WIDTH, pc);
     update_usage_at_level(pc, level, -1); 
-    if(level == 2) {
-      taggedPT_0[index0].usage--; 
-      taggedPT_1[index1].usage--; 
-    }else if(level == 1) {
-      taggedPT_2[index2].counter = WT; 
+    if(level == 1) {
+      taggedPT_2[index2].counter = 0; 
       taggedPT_2[index2].tag = tag; 
-      // TODO: not sure whether to set usage to 0 in the beginning
       taggedPT_2[index2].usage = USAGE_INIT; 
     }else if (level == 0){
-      taggedPT_1[index1].counter = WT; 
+      taggedPT_1[index1].counter = 0; 
       taggedPT_1[index1].tag = tag; 
-      // TODO: not sure whether to set usage to 0 in the beginning
       taggedPT_1[index1].usage = USAGE_INIT; 
     } else {
       // Set to weak correct in the beginning
-      taggedPT_0[index0].counter = WT; 
+      taggedPT_0[index0].counter = 0; 
       taggedPT_0[index0].tag = tag; 
-      // TODO: not sure whether to set usage to 0 in the beginning
       taggedPT_0[index0].usage = USAGE_INIT;
     }
   }
